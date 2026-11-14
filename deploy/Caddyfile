@@ -1,0 +1,5 @@
+# Utilisé par le profil "https" de docker-compose.yml : certificat local géré automatiquement par Caddy.
+{$SITE_ADDRESS} {
+    tls internal
+    reverse_proxy app:5000
+}

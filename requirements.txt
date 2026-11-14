@@ -1,0 +1,11 @@
+Flask>=3.0
+yfinance
+curl_cffi
+cloudscraper
+beautifulsoup4
+requests
+pandas
+numpy
+gunicorn
+tzdata
+cryptography

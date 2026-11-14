@@ -1,0 +1,42 @@
+services:
+  app:
+    build: .
+    image: invest-dash:latest
+    container_name: invest-dash
+    restart: unless-stopped
+    ports:
+      # Par défaut : accessible uniquement depuis cette machine (http://127.0.0.1:5000).
+      # BIND=0.0.0.0 dans .env pour l'ouvrir au réseau local (en HTTP : préférez le profil "https" ci-dessous).
+      - "${BIND:-127.0.0.1}:${PORT:-5000}:5000"
+    environment:
+      # Code COMMUN à connaître pour créer un compte (obligatoire : le démarrage échoue s'il est absent).
+      SIGNUP_CODE: ${SIGNUP_CODE:?Définissez SIGNUP_CODE dans le fichier .env (voir .env.example)}
+      # 1 uniquement derrière un reverse proxy (profil https, nginx...) : lit la vraie IP et le https.
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      SESSION_IDLE_MIN: ${SESSION_IDLE_MIN:-60}
+      SESSION_MAX_HOURS: ${SESSION_MAX_HOURS:-12}
+      GAP_SCHEDULER: ${GAP_SCHEDULER:-1}
+      TZ: Europe/Paris
+    volumes:
+      - invest-data:/app/data
+
+  # HTTPS automatique (certificat local) : docker compose --profile https up -d   (et TRUST_PROXY=1 dans .env)
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-invest-dash.home.arpa}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  invest-data:
+  caddy-data:
+  caddy-config:

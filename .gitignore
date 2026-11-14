@@ -1,0 +1,21 @@
+# Données personnelles (ne JAMAIS publier)
+data/
+*.db
+*.db-wal
+*.db-shm
+invest-dash-cle-de-recuperation.txt
+*cle-de-recuperation*
+
+# Environnement et secrets
+.venv/
+venv/
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Divers
+.DS_Store
+frontend/prompt.txt

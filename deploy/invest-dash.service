@@ -1,0 +1,19 @@
+[Unit]
+Description=Investment Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=invest
+WorkingDirectory=/opt/invest-dash
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Derrière nginx : l'application lit la vraie adresse IP du visiteur et le https (anti-force brute, cookies sécurisés)
+Environment=TRUST_PROXY=1
+# UN SEUL worker (+ threads) : les sessions (et donc les clés de chiffrement des utilisateurs connectés) vivent en mémoire de ce processus.
+# 127.0.0.1 si nginx est dans le même conteneur ; 0.0.0.0 s'il est dans un autre (voir DEPLOY.md).
+ExecStart=/opt/invest-dash/.venv/bin/gunicorn -w 1 --threads 4 --timeout 120 -b 127.0.0.1:5000 run:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

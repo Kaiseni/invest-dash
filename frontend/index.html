@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Investissements</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js"></script>
+</head>
+<body>
+    <!-- Menu Latéral -->
+    <aside class="sidebar">
+        <div class="logo">Investment<br>Dashboard</div>
+        <nav>
+            <a href="#" id="nav-dashboard" class="active" onclick="switchView('dashboard')">Bourse</a>
+            <a href="#" id="nav-alt" onclick="switchView('alt')">Crypto &amp; Matières</a>
+            <a href="#" id="nav-savings" onclick="switchView('savings')">Comptes sur Livret</a>
+            <a href="#" id="nav-holdings" onclick="switchView('holdings')">Composition (Top 10)</a>
+            <a href="#" id="nav-simulators" onclick="switchView('simulators')">Simulateurs</a>
+            <a href="#" id="nav-news" onclick="switchView('news')">Actualités</a>
+            <a href="#" id="nav-account" onclick="switchView('account')">Mon compte</a>
+            <a href="/api/export" target="_blank" style="margin-top: 20px; text-align: center; border: 1px solid var(--accent); color: var(--accent);">⬇ Exporter CSV</a>
+        </nav>
+        
+        <div class="user-box">
+            <span id="sidebarUser">…</span>
+            <button class="btn-mini" onclick="logout()">Se déconnecter</button>
+        </div>
+
+        <div class="add-asset-box">
+            <input type="text" id="tickerInput" placeholder="Ticker (ex: WPEA.PA)">
+            
+            <div class="post-it post-it-sidebar">
+                <strong>Places étrangères</strong>
+                Pour les actions étrangères (ex: <em>.AS</em>, <em>.DE</em>), saisissez le prix d'achat dans sa <strong>devise locale</strong>. Il sera converti automatiquement en €.
+            </div>
+
+            <input type="number" step="0.0001" id="qtyInput" placeholder="Quantité (ex: 0.5)">
+            <input type="number" step="0.0001" id="buyPriceInput" placeholder="Prix d'achat unitaire">
+            <input type="number" step="0.01" min="0" id="feesInput" placeholder="Frais de courtage (€, facultatif)">
+            <button onclick="addAsset()">+ Compléter</button>
+        </div>
+    </aside>
+
+    <!-- VUE 1 : TABLEAU DE BORD -->
+    <main id="view-dashboard" class="dashboard">
+        <div class="post-it">
+            <strong>Fonctionnement du Patrimoine Brut</strong>
+            La performance nette globale se calcule en soustrayant le <em>Total viré sur PEA</em> à la valeur actuelle de vos actifs. Assurez-vous que ce total est à jour dans l'encart Allocation.
+        </div>
+        <div id="driftAlert" class="drift-alert">⚠️ Dérive d'allocation détectée : un rééquilibrage est conseillé.</div>
+        <div class="top-grid">
+            <div class="card main-chart-card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>Patrimoine brut (Bourse + Liquidité)</h2>
+                    <div class="chart-filters" id="mainChartFilters" style="margin-bottom: 0;">
+                        <button class="filter-btn" data-period="1d" onclick="updateMainChartPeriod('1d')">1J</button>
+                        <button class="filter-btn" data-period="5d" onclick="updateMainChartPeriod('5d')">5J</button>
+                        <button class="filter-btn active" data-period="1mo" onclick="updateMainChartPeriod('1mo')">1M</button>
+                        <button class="filter-btn" data-period="1y" onclick="updateMainChartPeriod('1y')">1A</button>
+                        <button class="filter-btn" data-period="max" onclick="updateMainChartPeriod('max')">ALL</button>
+                    </div>
+                </div>
+                
+                <div class="portfolio-stats">
+                    <div class="total-value" id="totalWealth">0,00 €</div>
+                    <div id="totalGainLoss" class="gain-loss-badge">+0,00 € (0,00%)</div>
+                </div>
+                
+                <div class="portfolio-details" style="align-items: center;">
+                    <div class="detail-pill">Valeur boursière : <strong id="totalAssetsValue">0,00 €</strong></div>
+                    <div class="detail-pill">Performance nette : <strong id="latentGainLossDetail">+0,00 €</strong></div>
+                    <div class="detail-pill">PV réalisées : <strong id="realizedGLDisplay" style="color: #a78bfa;">0,00 €</strong></div>
+                    <div class="detail-pill">Liquidité dispo : <strong id="currentCashDisplay" style="color: var(--green);">0,00 €</strong></div>
+                    <div class="detail-pill">Cash bloqué (Ordres) : <strong id="lockedCashDisplay" style="color: #fbbf24;">0,00 €</strong></div>
+                </div>
+                
+                <div class="main-chart-wrapper"><canvas id="mainChart"></canvas></div>
+            </div>
+
+            <div class="card allocation-card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>Allocation</h2>
+                    <div class="cash-box" style="display: flex; gap: 5px; align-items: center;">
+                        <label style="font-size: 0.8rem; color: var(--text-muted);">Total viré sur PEA :</label>
+                        <input type="number" id="depositedInput" step="1" placeholder="Capital brut (€)" style="width: 120px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; outline: none;">
+                        <button onclick="updateDeposited()" style="background: var(--accent); color: black; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: bold;">Ok</button>
+                    </div>
+                </div>
+                <div class="doughnut-wrapper"><canvas id="allocationChart"></canvas></div>
+                <div id="dashboardSavingsBox" style="margin-top: 10px; padding: 8px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+                    <span style="color: var(--text-muted); display: flex; align-items: center; gap: 6px;">🏦 Total livrets d'épargne :</span>
+                    <strong id="dashboardSavingsVal" style="color: #60a5fa; font-size: 0.95rem;">0,00 €</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="assets-section" style="margin-bottom: 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+                <h2 style="color: #fbbf24; margin: 0;">⏳ Ordres en attente</h2>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <input type="text" id="pendingTicker" placeholder="Ticker (ex: WPEA.PA)" style="width: 120px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; outline: none;">
+                    <input type="number" id="pendingQty" step="0.0001" placeholder="Qté" style="width: 70px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; outline: none;">
+                    <input type="number" id="pendingPrice" step="0.0001" placeholder="Prix limite (€)" style="width: 110px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; outline: none;">
+                    <button onclick="addPendingOrder()" style="background: #fbbf24; color: black; border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; font-size: 0.85rem;">Placer l'ordre</button>
+                </div>
+            </div>
+            <div id="pendingOrdersGrid" class="assets-grid" style="grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
+                <!-- Les cartes d'ordres apparaîtront ici -->
+            </div>
+        </div>
+
+        <div class="assets-section">
+            <h2>Ma performance par actif</h2>
+            <div id="assetsGrid" class="assets-grid"></div>
+        </div>
+
+        <div class="card mb-4" id="soldSection" style="margin-bottom: 30px; display: none;">
+            <div class="card-header">
+                <h2 style="color: #a78bfa;">📊 Historique des ventes (PV réalisées)</h2>
+            </div>
+            <div id="soldContent" style="margin-top: 10px;"></div>
+        </div>
+
+    </main>
+
+    <!-- VUE 2 : COMPOSITION -->
+    <main id="view-holdings" class="dashboard" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 15px;">
+            <button class="filter-btn active" onclick="switchView('dashboard')" style="padding: 10px 15px;">&larr; Retour</button>
+            <h1 style="color: var(--accent); margin: 0; font-size: 1.8rem;">Composition de vos ETF</h1>
+        </div>
+        <div class="post-it">
+            <strong>Heatmap d'exposition</strong>
+            Ce graphique décortique l'intérieur de vos différents ETF (ex: MSCI World + S&P500). Il élimine les doublons pour afficher votre véritable exposition par pays et par entreprise.
+        </div>
+        <!-- NOUVEAU : Conteneur du Heatmap Global -->
+        <div class="card mb-4" style="margin-bottom: 25px;">
+            <div class="card-header">
+                <h2>Heatmap : Mon exposition globale consolidée</h2>
+            </div>
+            <div class="main-chart-wrapper" style="height: 350px; margin-top: 15px;">
+                <canvas id="holdingsHeatmap"></canvas>
+            </div>
+        </div>
+
+        <div id="holdingsGrid" class="holdings-grid">
+            <p class="text-muted">Analyse de vos actifs en cours...</p>
+        </div>
+    </main>
+
+    <!-- VUE 3 : COMPTES SUR LIVRET -->
+    <main id="view-savings" class="dashboard" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 15px;">
+            <button class="filter-btn active" onclick="switchView('dashboard')" style="padding: 10px 15px;">&larr; Retour</button>
+            <h1 style="color: var(--accent); margin: 0; font-size: 1.8rem;">Mes Comptes & Livrets</h1>
+        </div>
+
+        <div class="top-grid savings-grid">
+            <!-- Camembert de répartition -->
+            <div class="card allocation-card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>Répartition de l'épargne</h2>
+                    <span id="savingsTotalHeader" style="font-size: 0.95rem; font-weight: bold; color: var(--accent);"></span>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 20px; min-height: 0;">
+                    <div class="doughnut-wrapper" style="flex: 1.2; height: 260px; min-width: 200px;"><canvas id="savingsChart"></canvas></div>
+                    <div id="savingsSideTotal" style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 180px;">
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Total Épargne Livrets</div>
+                            <div id="savingsTotalVal" style="font-size: 1.6rem; font-weight: bold; color: #ffffff; margin-top: 4px;">0,00 €</div>
+                        </div>
+                        <div style="border-top: 1px solid var(--border); padding-top: 10px;">
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Intérêts déjà acquis</div>
+                            <div id="savingsEarnedVal" style="font-size: 1.05rem; font-weight: 600; color: var(--green); margin-top: 2px;">+0,00 €</div>
+                            <div id="savingsInterestVal" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">Projection : +0,00 € / an</div>
+                        </div>
+                        <div id="savingsMiniList" style="border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; max-height: 120px; overflow-y: auto;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Formulaire d'ajout avec Taux -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Ajouter un compte</h2>
+                </div>
+                <div class="add-asset-box" style="margin-top: 15px; border: none; padding: 0; background: transparent;">
+                    <input type="text" id="saveBankInput" placeholder="Banque (ex: BoursoBank)">
+                    <input type="text" id="saveNameInput" placeholder="Nom (ex: Livret A)">
+                    <input type="number" step="0.01" id="saveBalanceInput" placeholder="Solde (€)">
+                    <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center;">
+                        <input type="number" step="0.1" id="saveRateInput" placeholder="Taux % (ex: 1.7)" style="margin-bottom: 0;">
+                        <span style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">% an.</span>
+                    </div>
+                    <!-- Nouveau champ -->
+                    <input type="number" step="0.01" id="saveEarnedInput" placeholder="Intérêts déjà acquis (€)" style="margin-bottom: 10px;">
+                    <button onclick="addSaving()">+ Ajouter ce compte</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="assets-section" style="margin-top: 30px;">
+            <div id="savingsGrid" class="assets-grid">
+                <p class="text-muted">Chargement de vos comptes...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- VUE 4 : SIMULATEURS -->
+    <main id="view-simulators" class="dashboard" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 15px;">
+            <button class="filter-btn active" onclick="switchView('dashboard')" style="padding: 10px 15px;">&larr; Retour</button>
+            <h1 style="color: var(--accent); margin: 0; font-size: 1.8rem;">Simulateurs & Planification</h1>
+        </div>
+        <div class="post-it">
+            <strong>Plan d'investissement mensuel</strong>
+            Définissez votre répartition cible en cliquant sur <em>⚙️ Ma répartition</em>. L'algorithme déterminera les actifs à acheter en priorité pour corriger vos déséquilibres.
+        </div>
+        
+        <div class="card mb-4" style="margin-bottom: 30px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="color: #60a5fa;">🔮 Arbre de Prédiction (Monte-Carlo)</h2>
+                <div class="cash-box" style="display: flex; gap: 5px; align-items: center;">
+                    <label style="font-size: 0.85rem; color: var(--text-muted);">Années :</label>
+                    <input type="number" id="mcYearsInput" value="10" min="1" max="100" style="width: 70px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; outline: none;">
+                    <label style="font-size: 0.85rem; color: var(--text-muted);">Versement / mois (€) :</label>
+                    <input type="number" id="mcMonthlyInput" value="0" min="0" step="10" style="width: 90px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; outline: none;">
+                    <button onclick="runMonteCarlo()" style="background: #60a5fa; color: black; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: bold;">Simuler</button>
+                </div>
+            </div>
+            <div id="mcStats" style="margin-top: 10px; font-size: 0.85rem; color: var(--text-muted);">
+                Calcul de 1000 scénarios probabilistes basés sur les 5 dernières années de marché...
+            </div>
+            <div class="main-chart-wrapper" style="height: 550px; margin-top: 15px;">
+                <canvas id="mcChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card mb-4" style="margin-bottom: 30px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <h2 id="planTitle">Plan d'investissement mensuel</h2>
+                <div class="cash-box" style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                    <select id="brokerSelect" style="background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; outline: none; cursor: pointer;">
+                        <option value="boursobank">BoursoBank (Min 100€, parts entières)</option>
+                        <option value="traderepublic">Trade Republic (Fractions, Min 1€)</option>
+                        <option value="xtb">XTB (Fractions, Min 10€)</option>
+                        <option value="etoro">eToro (Fractions, Min 10$)</option>
+                        <option value="ibkr">Interactive Brokers (Fractions)</option>
+                        <option value="ig">IG (Parts entières, sans min)</option>
+                        <option value="saxo">Saxo Banque (Parts entières, sans min)</option>
+                    </select>
+                    <input type="number" id="budgetInput" step="10" placeholder="Capacité mensuelle (€)" style="width: 170px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; outline: none;">
+                    <button onclick="updateBudget()" style="background: var(--accent); color: black; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: bold;">Calculer</button>
+                </div>
+            </div>
+            <div style="margin-top: 10px;"><button class="btn-mini" onclick="toggleTargetsEditor()">⚙️ Ma répartition</button></div>
+            <div id="targetsEditor" class="targets-editor" style="display: none;"></div>
+            <div id="actionPlanContent" style="margin-top: 15px;">
+                <p class="text-muted">Définissez un montant à investir ce mois-ci pour voir la répartition optimale.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- VUE 5 : ACTUALITÉS -->
+    <main id="view-news" class="dashboard" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 15px;">
+            <button class="filter-btn active" onclick="switchView('dashboard')" style="padding: 10px 15px;">&larr; Retour</button>
+            <h1 style="color: var(--accent); margin: 0; font-size: 1.8rem;">Actualités du marché</h1>
+        </div>
+        <div id="newsGrid" class="news-grid">
+            <p class="loading-text text-muted">Chargement des actualités...</p>
+        </div>
+    </main>
+
+    <!-- Fenêtre Modale -->
+    <div id="assetModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h2 id="modalTitle">Nom de l'actif</h2>
+                    <span id="modalTicker" class="text-muted">TICKER</span>
+                </div>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="modal-price-zone">
+                    <div class="modal-price" id="modalPrice">0,00 €</div>
+                    <div class="modal-perf" id="modalPerf">+0,00% (Jour)</div>
+                </div>
+
+                <!-- NOUVEAU : Encadré Ma Position (PRU, Capital investi, Plus-value latente) -->
+                <h3 style="font-size: 0.9rem; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Ma Position</h3>
+                <div class="stat-grid" style="margin-bottom: 20px; border-color: rgba(200, 154, 116, 0.25);">
+                    <div class="stat-box"><span>Quantité détenue</span><strong id="modalQty">0</strong></div>
+                    <div class="stat-box"><span>PRU (Prix d'achat moyen)</span><strong id="modalBuyPrice">0,0000 €</strong></div>
+                    <div class="stat-box"><span>Capital investi</span><strong id="modalInvested">0,00 €</strong></div>
+                    <div class="stat-box"><span>Plus-value latente</span><strong id="modalGainLoss">+0,00 € (0,00%)</strong></div>
+                </div>
+                <h3 style="font-size: 0.9rem; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Mes entrées d'achat</h3>
+                <div id="modalLots" style="margin-bottom: 20px;"></div>
+                
+                <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Marché du jour</h3>
+                <div class="stat-grid">
+                    <div class="stat-box"><span>Ouverture</span><strong id="modalOpen">0,00 €</strong></div>
+                    <div class="stat-box"><span>Clôture veille</span><strong id="modalPrev">0,00 €</strong></div>
+                    <div class="stat-box"><span>+ haut</span><strong id="modalHigh">0,00 €</strong></div>
+                    <div class="stat-box"><span>+ bas</span><strong id="modalLow">0,00 €</strong></div>
+                </div>
+
+                <div class="chart-filters">
+                    <button class="filter-btn" data-period="1d" onclick="updateChartPeriod('1d')">1J</button>
+                    <button class="filter-btn" data-period="5d" onclick="updateChartPeriod('5d')">5J</button>
+                    <button class="filter-btn" data-period="1mo" onclick="updateChartPeriod('1mo')">1M</button>
+                    <button class="filter-btn" data-period="1y" onclick="updateChartPeriod('1y')">1A</button>
+                    <button class="filter-btn" data-period="max" onclick="updateChartPeriod('max')">ALL</button>
+                </div>
+
+                <div class="modal-chart-wrapper"><canvas id="modalChart"></canvas></div>
+
+                <div class="modal-summary">
+                    <h3>Objectif de gestion</h3>
+                    <p id="modalSummaryText">Description du fonds...</p>
+                </div>
+
+                <div style="margin-top: 25px; border-top: 1px solid var(--border); padding-top: 20px;">
+                    <h3 style="font-size: 0.9rem; color: #a78bfa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Vendre cet actif</h3>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <input type="number" id="sellQtyInput" oninput="updateSellPreview()" step="0.0001" placeholder="Quantité" style="width: 100px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; outline: none;">
+                        <input type="number" id="sellPriceInput" oninput="updateSellPreview()" step="0.0001" placeholder="Prix de vente" style="width: 120px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; outline: none;">
+                        <div id="sellPreview" class="text-muted" style="flex-basis: 100%; font-size: 0.8rem; margin-top: 4px;"></div>
+                        <button onclick="sellCurrentAsset()" style="background: #a78bfa; color: black; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: bold;">Vendre</button>
+                    </div>
+                </div>
+
+                <div style="margin-top: 15px; text-align: center;">
+                    <button class="btn-delete" onclick="deleteCurrentAsset()">Supprimer cet actif</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Fenêtre Modale de Modification de Livret -->
+    <div id="editSavingModal" class="modal">
+        <div class="modal-content" style="max-width: 400px; padding: 25px;">
+            <div class="modal-header" style="margin-bottom: 15px;">
+                <h2 style="font-size: 1.3rem;">Modifier le compte</h2>
+                <button class="close-btn" onclick="closeEditSavingModal()">&times;</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <input type="hidden" id="editSavingId">
+                
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Banque</label>
+                    <input type="text" id="editSavingBank" style="width: 100%; background: #1f1f1f; border: 1px solid var(--border); color: white; padding: 10px; border-radius: 6px; outline: none;">
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Nom du livret</label>
+                    <input type="text" id="editSavingName" style="width: 100%; background: #1f1f1f; border: 1px solid var(--border); color: white; padding: 10px; border-radius: 6px; outline: none;">
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Solde actuel (€)</label>
+                    <input type="number" step="0.01" id="editSavingBalance" style="width: 100%; background: #1f1f1f; border: 1px solid var(--border); color: white; padding: 10px; border-radius: 6px; outline: none;">
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Taux annuel (%)</label>
+                    <input type="number" step="0.1" id="editSavingRate" style="width: 100%; background: #1f1f1f; border: 1px solid var(--border); color: white; padding: 10px; border-radius: 6px; outline: none;">
+                </div>
+                <div>
+                    <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Intérêts déjà acquis cette année (€)</label>
+                    <input type="number" step="0.01" id="editSavingEarned" style="width: 100%; background: #1f1f1f; border: 1px solid var(--border); color: white; padding: 10px; border-radius: 6px; outline: none;">
+                </div>
+                
+                <button onclick="saveEditedSaving()" style="background: #60a5fa; color: black; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px;">Enregistrer les modifications</button>
+            </div>
+        </div>
+    </div>
+
+            <!-- VUE 7 : CRYPTO & MATIÈRES PREMIÈRES -->
+    <main id="view-alt" class="dashboard" style="display: none;">
+        <div class="top-grid">
+            <div class="card main-chart-card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>Patrimoine crypto &amp; matières premières (hors PEA)</h2>
+                    <div class="chart-filters" id="altFilters" style="margin-bottom: 0;">
+                        <button class="filter-btn" data-period="1d" onclick="updateAltChartPeriod('1d')">1J</button>
+                        <button class="filter-btn" data-period="5d" onclick="updateAltChartPeriod('5d')">5J</button>
+                        <button class="filter-btn active" data-period="1mo" onclick="updateAltChartPeriod('1mo')">1M</button>
+                        <button class="filter-btn" data-period="1y" onclick="updateAltChartPeriod('1y')">1A</button>
+                        <button class="filter-btn" data-period="max" onclick="updateAltChartPeriod('max')">ALL</button>
+                    </div>
+                </div>
+
+                <div class="portfolio-stats">
+                    <div class="total-value" id="altTotal">0,00 €</div>
+                    <div id="altGain" class="gain-loss-badge">+0,00 € (0,00%)</div>
+                </div>
+
+                <div class="portfolio-details" style="align-items: center;">
+                    <div class="detail-pill">Investi : <strong id="altInvested">0,00 €</strong></div>
+                    <div class="detail-pill">Plus-value latente : <strong id="altPL">+0,00 €</strong></div>
+                    <div class="detail-pill">Liquidités : <strong id="altCash">0,00 €</strong> <button class="btn-mini" style="padding: 2px 8px; margin-left: 6px;" onclick="adjustAltCash()" title="Ajouter (apport) ou retirer (retrait) de l'argent">±</button></div>
+                    <div class="detail-pill">Plus-values réalisées : <strong id="altRealized">+0,00 €</strong></div>
+                    <div class="detail-pill">Valeur en dollars : <strong id="altValueUsd">—</strong></div>
+                    <div class="detail-pill">Positions : <strong id="altCount">0</strong></div>
+                    <button class="btn-mini" onclick="loadAlt()">↻ Actualiser</button>
+                    <span id="altStatus" class="text-muted" style="font-size: 0.78rem;"></span>
+                </div>
+
+                <div class="main-chart-wrapper">
+                    <canvas id="altMainChart"></canvas>
+                    <div id="altChartEmpty" class="text-muted" style="position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 20px;">Ajoutez une position pour voir l'évolution de votre patrimoine.</div>
+                </div>
+            </div>
+
+            <div class="card allocation-card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <h2>Allocation</h2>
+                    <div class="cash-box" style="display: flex; gap: 5px; align-items: center;">
+                        <label style="font-size: 0.8rem; color: var(--text-muted);">Total viré sur le wallet :</label>
+                        <input type="number" id="altDepositedInput" step="1" min="0" placeholder="Capital brut (€)" style="width: 120px; background: #1f1f1f; border: 1px solid var(--border); color: white; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem; outline: none;">
+                        <button onclick="updateAltDeposited()" style="background: var(--accent); color: black; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: bold;">Ok</button>
+                    </div>
+                </div>
+                <div class="doughnut-wrapper"><canvas id="altAllocChart"></canvas></div>
+                <div id="altAllocNote" style="margin-top: 10px; padding: 8px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 10px; font-size: 0.82rem; color: var(--text-muted);">—</div>
+            </div>
+        </div>
+
+        <div class="assets-section">
+            <h2>Mes positions</h2>
+            <div id="altCards" class="assets-grid"></div>
+        </div>
+
+        <div class="card" id="altSoldSection" style="display: none;">
+            <h2 style="margin-bottom: 12px;">Historique des ventes (plus-values réalisées)</h2>
+            <div id="altSoldContent" style="overflow-x: auto;"></div>
+        </div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 12px;">Ajouter une position</h2>
+            <div class="alt-form">
+                <select id="altKind" class="field" onchange="updateAltForm()">
+                    <option value="crypto">Cryptomonnaie</option>
+                    <option value="commodity">Matière première</option>
+                </select>
+                <input id="altSymbol" class="field" list="altSymbols" placeholder="Symbole (ex: BTC, ETH, SOL…)" autocomplete="off">
+                <datalist id="altSymbols"></datalist>
+                <select id="altCommodity" class="field" style="display: none;" onchange="updateAltForm()"></select>
+                <select id="altUnit" class="field" style="display: none;">
+                    <option value="base">Quantité en onces troy</option>
+                    <option value="g">Quantité en grammes</option>
+                </select>
+                <input id="altQty" type="number" class="field" step="any" min="0" placeholder="Quantité">
+                <input id="altPrice" type="number" class="field" step="any" min="0" placeholder="Prix d'achat (€)">
+                <input id="altFees" type="number" class="field" step="0.01" min="0" placeholder="Frais (€, facultatif)">
+                <label class="text-muted" style="font-size: 0.82rem; display: flex; align-items: center; gap: 6px;" title="Débite le coût de l'achat de vos liquidités (issues de vos ventes)"><input type="checkbox" id="altFromCash"> Payer avec mes liquidités</label>
+                <button class="btn-primary" onclick="addAlt()">Ajouter</button>
+            </div>
+            <div id="altMsg" class="notice" style="display: none;"></div>
+        </div>
+
+        <div class="account-grid">
+            <div class="card"><h2 style="margin-bottom: 12px;">Cryptomonnaies</h2><div id="altCrypto" style="overflow-x: auto;"></div></div>
+            <div class="card"><h2 style="margin-bottom: 12px;">Matières premières</h2><div id="altCommodities" style="overflow-x: auto;"></div></div>
+        </div>
+        <p class="text-muted" style="font-size: 0.78rem;">Prix : Yahoo Finance (repli CoinGecko pour les cryptos), rafraîchis toutes les 30 s. Matières premières : cours des contrats à terme en USD convertis en EUR ; ce ne sont pas des prix de détail (pièces, lingots) qui incluent une prime. Le graphique valorise vos quantités actuelles avec les cours passés. Indicatif, sans valeur de conseil.</p>
+    </main>
+
+    <!-- VUE 6 : MON COMPTE -->
+    <main id="view-account" class="dashboard" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 15px;">
+            <h1 style="color: var(--accent);">Mon compte</h1>
+        </div>
+        <div class="account-grid">
+            <div class="card">
+                <h2 style="margin-bottom: 12px;">Sécurité</h2>
+                <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 12px;">Connecté en tant que <strong id="accountName">…</strong>. Vos données sont chiffrées avec une clé qui n'existe que pour vous.</p>
+                <input type="password" id="oldPassword" class="field" placeholder="Mot de passe actuel" autocomplete="current-password">
+                <input type="password" id="newPassword" class="field" placeholder="Nouveau mot de passe (10 caractères min.)" autocomplete="new-password">
+                <button class="btn-primary" onclick="changePassword()">Changer le mot de passe</button>
+                <div id="accountMsg" class="notice" style="display: none;"></div>
+            </div>
+            <div class="card">
+                <h2 style="margin-bottom: 12px;">Mes données (RGPD)</h2>
+                <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 12px;">Vous pouvez récupérer toutes vos données dans un fichier, ou supprimer définitivement votre compte et tout ce qu'il contient.</p>
+                <button class="btn-primary" onclick="downloadMyData()">⬇ Télécharger mes données (JSON)</button>
+                <hr style="border: none; border-top: 1px solid var(--border); margin: 18px 0;">
+                <button class="btn-delete" onclick="deleteMyAccount()">Supprimer mon compte et mes données</button>
+            </div>
+            <div class="card" id="adminCard" style="display: none;">
+                <h2 style="margin-bottom: 12px;">Administration</h2>
+                <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 12px;">Pour ajouter quelqu'un, créez un code d'invitation (valable 7 jours, à usage unique). La personne choisit elle-même son mot de passe : vous ne pouvez jamais lire ses données.</p>
+                <p id="commonCodeNote" class="text-muted" style="font-size: 0.8rem; margin-bottom: 10px;"></p>
+                <button class="btn-primary" onclick="createInvite()">Créer un code d'invitation à usage unique</button>
+                <div id="inviteBox" class="notice" style="display: none;"></div>
+                <h3 style="margin: 18px 0 8px; font-size: 0.95rem;">Comptes</h3>
+                <div id="usersList"></div>
+            </div>
+        </div>        
+    </main>
+
+    <!-- MODALE : VENTE CRYPTO / MATIÈRE PREMIÈRE -->
+        <div id="altSellModal" class="modal">
+            <div class="modal-content" style="max-width: 460px;">
+                <div class="modal-header">
+                    <h2 id="altSellTitle">Vendre</h2>
+                    <button class="close-btn" onclick="closeAltSell()">&times;</button>
+                </div>
+                <p id="altSellInfo" class="text-muted" style="font-size: 0.85rem; margin-bottom: 12px;"></p>
+                <input id="altSellQty" type="number" class="field" step="any" min="0" placeholder="Quantité à vendre" oninput="updateAltSellPreview()">
+                <input id="altSellPrice" type="number" class="field" step="any" min="0" placeholder="Prix de vente unitaire (€)" oninput="updateAltSellPreview()">
+                <input id="altSellFees" type="number" class="field" step="0.01" min="0" placeholder="Frais (€, facultatif)" oninput="updateAltSellPreview()">
+                <div id="altSellPreview" class="notice" style="margin: 0 0 12px;"></div>
+                <div id="altSellError" style="color: var(--red); font-size: 0.85rem; margin-bottom: 10px;"></div>
+                <button class="btn-primary" style="width: 100%;" onclick="confirmAltSell()">Confirmer la vente</button>
+            </div>
+        </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/portfolio.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/modal.js"></script>
+<script src="js/planner.js"></script>
+<script src="js/navigation.js"></script>
+<script src="js/news.js"></script>
+<script src="js/holdings.js"></script>
+<script src="js/simulation.js"></script>
+<script src="js/savings.js"></script>
+<script src="js/alt.js"></script>
+    <script src="js/account.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
